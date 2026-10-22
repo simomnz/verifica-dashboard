@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>User Stories Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --line: #e2e5ea;
+    --text: #1b1f24;
+    --muted: #6b7280;
+    --accent: #2f6feb;
+    --green: #1a7f37;
+    --amber: #9a6700;
+    --grey: #6b7280;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117;
+      --card: #161b22;
+      --line: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #4f8cf7;
+      --green: #3fb950;
+      --amber: #d29922;
+      --grey: #8b949e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117;
+    --card: #161b22;
+    --line: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #4f8cf7;
+    --green: #3fb950;
+    --amber: #d29922;
+    --grey: #8b949e;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0 16px 64px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px;
+    align-items: center; justify-content: space-between;
+    padding: 24px 0 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  button {
+    font: inherit; font-size: 14px;
+    padding: 7px 14px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { color: #fff; opacity: .9; }
+
+  .who { font-size: 13px; color: var(--muted); text-align: right; }
+  .who b { color: var(--text); font-weight: 600; }
+
+  .columns {
+    display: grid; gap: 16px; margin-top: 24px;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+  .col h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px; margin-bottom: 10px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+  .row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 2px 0; }
+  .row span:first-child { color: var(--muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  a { color: var(--accent); }
+
+  .flags { display: flex; gap: 6px; margin: 10px 0 2px; flex-wrap: wrap; }
+  .flag {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted);
+  }
+  .flag.on { color: var(--green); border-color: var(--green); }
+  .flag.wait { color: var(--amber); border-color: var(--amber); }
+
+  .actions { margin-top: 12px; display: flex; gap: 8px; }
+  .empty { color: var(--muted); font-size: 13px; font-style: italic; padding: 8px 0; }
+  .note {
+    margin-top: 24px; padding: 12px 14px; border-radius: 8px;
+    background: var(--card); border: 1px solid var(--line);
+    color: var(--muted); font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>User Stories Dashboard</h1>
+      <div class="sub" id="contractLine">loading…</div>
+    </div>
+    <div>
+      <button class="primary" id="connect">Connect wallet</button>
+      <div class="who" id="who"></div>
+    </div>
+  </header>
+
+  <div class="columns" id="columns"></div>
+
+  <div class="note" id="note"></div>
+
+</div>
+
+<script>
+// ------------------------------------------------------------
+// Configurazione: l'unica parte da cambiare se si pubblica un
+// contratto nuovo o si usa un altro repository.
+// ------------------------------------------------------------
+const CONTRACT = "0xc43766fBdf1c59B2d88bF674C08967E60eE84d08";
+const REPO     = "https://github.com/simomnz/consegna-esercizi";
+const RPC      = "https://ethereum-sepolia-rpc.publicnode.com";
+const EXPLORER = "https://sepolia.etherscan.io";
+const CHAIN_ID = 11155111n;          // Sepolia
+
+const ABI = [
+  "function dimUSList() view returns (uint256)",
+  "function US(uint256) view returns (uint256 effort, uint256 payment, bool status, bool payed, bool funded, address developer, address funder, bytes20 commit)",
+  "function getAuthorizations(uint256) view returns (bool[3])",
+  "function isAuthorized(uint256) view returns (bool)",
+  "function owner() view returns (address)",
+  "function productOwner() view returns (address)",
+  "function verifier() view returns (address)",
+  "function client() view returns (address)",
+  "function authorize(uint256)",
+  "function sendPayment(uint256)",
+  "function fundUS(uint256) payable"
+];
+
+// Il provider di sola lettura: la pagina mostra i dati anche senza
+// portafoglio collegato. Il portafoglio serve solo per firmare.
+const reader = new ethers.JsonRpcProvider(RPC);
+const readOnly = new ethers.Contract(CONTRACT, ABI, reader);
+
+let signer = null;
+let me = null;       // indirizzo collegato
+let roles = {};      // owner, productOwner, verifier, client
+
+const short = a => a.slice(0, 6) + "…" + a.slice(-4);
+const same = (a, b) => a && b && a.toLowerCase() === b.toLowerCase();
+
+// ------------------------------------------------------------
+// Lettura dello stato
+// ------------------------------------------------------------
+
+async function loadRoles() {
+  const [owner, productOwner, verifier, client] = await Promise.all([
+    readOnly.owner(), readOnly.productOwner(),
+    readOnly.verifier(), readOnly.client()
+  ]);
+  roles = { owner, productOwner, verifier, client };
+}
+
+async function loadStories() {
+  const total = Number(await readOnly.dimUSList());
+  const stories = [];
+
+  for (let id = 0; id < total; id++) {
+    const [story, auth] = await Promise.all([
+      readOnly.US(id), readOnly.getAuthorizations(id)
+    ]);
+
+    stories.push({
+      id,
+      payment: story.payment,
+      taken: story.status,
+      payed: story.payed,
+      funded: story.funded,
+      developer: story.developer,
+      funder: story.funder,
+      commit: story.commit,
+      tests: auth[0],
+      po: auth[1],
+      client: auth[2]
+    });
+  }
+  return stories;
+}
+
+// In quale colonna va una user story: segue lo stesso ordine del
+// processo, dalla pubblicazione al pagamento.
+function column(s) {
+  if (s.payed) return "paid";
+  if (s.tests && s.po) return "toPay";
+  if (s.tests) return "toReview";
+  if (s.taken) return "inProgress";
+  if (s.funded) return "open";
+  return "draft";
+}
+
+const COLUMNS = [
+  ["toReview",   "To review"],
+  ["toPay",      "Approved, awaiting payment"],
+  ["inProgress", "In progress"],
+  ["open",       "Open"],
+  ["draft",      "Not funded"],
+  ["paid",       "Paid"]
+];
+
+// ------------------------------------------------------------
+// Disegno
+// ------------------------------------------------------------
+
+function cardFor(s) {
+  const card = document.createElement("div");
+  card.className = "card";
+
+  const commit = s.commit.replace(/^0x/, "");
+  const isEmpty = /^0+$/.test(commit);
+
+  card.innerHTML = `
+    <h3>User story ${s.id}</h3>
+    <div class="row"><span>Payment</span><span>${ethers.formatEther(s.payment)} ETH</span></div>
+    <div class="row"><span>Developer</span><span class="mono">${
+      s.developer === ethers.ZeroAddress ? "—" :
+      `<a href="${EXPLORER}/address/${s.developer}" target="_blank">${short(s.developer)}</a>`
+    }</span></div>
+    <div class="row"><span>Commit</span><span class="mono">${
+      isEmpty ? "—" : `<a href="${REPO}/commit/${commit}" target="_blank">${commit.slice(0, 7)}</a>`
+    }</span></div>
+    <div class="flags">
+      <span class="flag ${s.funded ? "on" : ""}">funded</span>
+      <span class="flag ${s.taken ? "on" : ""}">taken</span>
+      <span class="flag ${s.tests ? "on" : "wait"}">tests</span>
+      <span class="flag ${s.po ? "on" : "wait"}">product owner</span>
+      ${roles.client !== ethers.ZeroAddress
+        ? `<span class="flag ${s.client ? "on" : "wait"}">client</span>` : ""}
+      <span class="flag ${s.payed ? "on" : ""}">paid</span>
+    </div>
+  `;
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+
+  // Il Product Owner approva quello che ha gia' passato i test.
+  if (me && same(me, roles.productOwner) && s.tests && !s.po && !s.payed) {
+    actions.appendChild(button("Approve", () => send("authorize", s.id)));
+  }
+
+  // Il cliente, se previsto, fa lo stesso sulla sua casella.
+  if (me && roles.client !== ethers.ZeroAddress && same(me, roles.client)
+      && s.tests && !s.client && !s.payed) {
+    actions.appendChild(button("Approve as client", () => send("authorize", s.id)));
+  }
+
+  // Lo sviluppatore riscuote quando ci sono tutte le firme.
+  if (me && same(me, s.developer) && !s.payed && s.tests && s.po) {
+    actions.appendChild(button("Claim payment", () => send("sendPayment", s.id), true));
+  }
+
+  if (actions.children.length) card.appendChild(actions);
+  return card;
+}
+
+function button(label, onClick, primary) {
+  const b = document.createElement("button");
+  b.textContent = label;
+  if (primary) b.className = "primary";
+  b.onclick = async () => {
+    b.disabled = true;
+    b.textContent = "Waiting…";
+    try {
+      await onClick();
+      await refresh();
+    } catch (e) {
+      alert(reason(e));
+      b.disabled = false;
+      b.textContent = label;
+    }
+  };
+  return b;
+}
+
+// Il motivo del rifiuto sta annidato nell'errore: lo tiriamo fuori
+// per mostrare il messaggio del contratto invece di un muro di testo.
+function reason(e) {
+  return e?.reason || e?.info?.error?.message || e?.shortMessage || e?.message || String(e);
+}
+
+async function send(method, id) {
+  const writable = new ethers.Contract(CONTRACT, ABI, signer);
+  const tx = await writable[method](id);
+  await tx.wait();
+}
+
+async function refresh() {
+  const stories = await loadStories();
+  const groups = {};
+  for (const s of stories) (groups[column(s)] ||= []).push(s);
+
+  const root = document.getElementById("columns");
+  root.innerHTML = "";
+
+  for (const [key, title] of COLUMNS) {
+    const list = groups[key] || [];
+    if (!list.length && (key === "draft" || key === "open")) continue;
+
+    const col = document.createElement("div");
+    col.className = "col";
+    col.innerHTML = `<h2>${title} (${list.length})</h2>`;
+
+    if (!list.length) {
+      col.insertAdjacentHTML("beforeend", `<div class="empty">nothing here</div>`);
+    } else {
+      for (const s of list) col.appendChild(cardFor(s));
+    }
+    root.appendChild(col);
+  }
+}
+
+// ------------------------------------------------------------
+// Portafoglio
+// ------------------------------------------------------------
+
+function myRole() {
+  if (!me) return "";
+  if (same(me, roles.productOwner)) return "Product Owner";
+  if (same(me, roles.verifier)) return "Verifier";
+  if (roles.client !== ethers.ZeroAddress && same(me, roles.client)) return "Client";
+  if (same(me, roles.owner)) return "Owner";
+  return "Developer or visitor";
+}
+
+async function connect() {
+  if (!window.ethereum) {
+    alert("No wallet found. Install MetaMask to sign.");
+    return;
+  }
+
+  const browser = new ethers.BrowserProvider(window.ethereum);
+  await browser.send("eth_requestAccounts", []);
+
+  const net = await browser.getNetwork();
+  if (net.chainId !== CHAIN_ID) {
+    alert("Wrong network: switch MetaMask to Sepolia.");
+    return;
+  }
+
+  signer = await browser.getSigner();
+  me = await signer.getAddress();
+
+  document.getElementById("who").innerHTML =
+    `<b>${short(me)}</b><br>${myRole()}`;
+  document.getElementById("connect").textContent = "Connected";
+
+  await refresh();
+}
+
+// MetaMask non avvisa la pagina quando si cambia conto: ci si deve
+// mettere in ascolto, se no la pagina resta a mostrare il conto vecchio.
+if (window.ethereum) {
+  window.ethereum.on("accountsChanged", () => location.reload());
+  window.ethereum.on("chainChanged", () => location.reload());
+}
+
+document.getElementById("connect").onclick = connect;
+
+// ------------------------------------------------------------
+// Avvio
+// ------------------------------------------------------------
+
+(async () => {
+  document.getElementById("contractLine").innerHTML =
+    `Sepolia · <a href="${EXPLORER}/address/${CONTRACT}" target="_blank" class="mono">${short(CONTRACT)}</a>`;
+
+  document.getElementById("note").textContent =
+    "Automated tests are signed by the verification system. "
+    + "The Product Owner approves by hand, and the developer claims the payment "
+    + "when all the required signatures are in place.";
+
+  try {
+    await loadRoles();
+    await refresh();
+  } catch (e) {
+    document.getElementById("columns").innerHTML =
+      `<div class="empty">Cannot reach the contract: ${reason(e)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>
