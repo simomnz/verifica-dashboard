@@ -92,6 +92,7 @@
   .row span:first-child { color: var(--muted); }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   a { color: var(--accent); }
+  .links { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 
   .flags { display: flex; gap: 6px; margin: 10px 0 2px; flex-wrap: wrap; }
   .flag {
@@ -137,6 +138,32 @@
 // ------------------------------------------------------------
 const CONTRACT = "0xc43766fBdf1c59B2d88bF674C08967E60eE84d08";
 const REPO     = "https://github.com/simomnz/consegna-esercizi";
+
+// A quali task corrisponde ogni user story. La stessa user story puo'
+// esistere in piu' sistemi di project management contemporaneamente:
+// i criteri sono identici, cambia solo dove sono scritti.
+//
+// Finche' lo smart contract non registra un riferimento esterno, questa
+// corrispondenza va tenuta a mano: e' lo stesso legame che la user story
+// dichiara con il campo "Blockchain:" nella sua intestazione, solo
+// percorso nella direzione opposta.
+const OPENPROJECT = "http://127.0.0.1:8090";
+const TAIGA       = "https://tree.taiga.io/project/simomnz-prova-api";
+const JIRA        = "https://simomnz.atlassian.net";
+
+const TASKS = {
+  0: [
+    { label: "OpenProject #1115", url: OPENPROJECT + "/work_packages/1115" }
+  ],
+  1: [
+    { label: "OpenProject #1115", url: OPENPROJECT + "/work_packages/1115" }
+  ],
+  2: [
+    { label: "OpenProject #1115", url: OPENPROJECT + "/work_packages/1115" },
+    { label: "Taiga #7",          url: TAIGA + "/us/7" },
+    { label: "Jira KAN-12",       url: JIRA + "/browse/KAN-12" }
+  ]
+};
 const RPC      = "https://ethereum-sepolia-rpc.publicnode.com";
 const EXPLORER = "https://sepolia.etherscan.io";
 const CHAIN_ID = 11155111n;          // Sepolia
@@ -166,6 +193,13 @@ let roles = {};      // owner, productOwner, verifier, client
 
 const short = a => a.slice(0, 6) + "…" + a.slice(-4);
 const same = (a, b) => a && b && a.toLowerCase() === b.toLowerCase();
+
+// Gli importi minuscoli in ether diventano file di zeri illeggibili:
+// sotto 0,0001 ether si mostrano in wei, che e' l'unita' vera.
+function money(wei) {
+  if (wei < 100000000000000n) return wei.toString() + " wei";
+  return ethers.formatEther(wei) + " ETH";
+}
 
 // ------------------------------------------------------------
 // Lettura dello stato
@@ -235,10 +269,14 @@ function cardFor(s) {
 
   const commit = s.commit.replace(/^0x/, "");
   const isEmpty = /^0+$/.test(commit);
+  const tasks = TASKS[s.id] || [];
 
   card.innerHTML = `
     <h3>User story ${s.id}</h3>
-    <div class="row"><span>Payment</span><span>${ethers.formatEther(s.payment)} ETH</span></div>
+    ${tasks.length ? `<div class="row"><span>Task</span><span class="links">${
+      tasks.map(t => `<a href="${t.url}" target="_blank">${t.label}</a>`).join("")
+    }</span></div>` : ""}
+    <div class="row"><span>Payment</span><span>${money(s.payment)}</span></div>
     <div class="row"><span>Developer</span><span class="mono">${
       s.developer === ethers.ZeroAddress ? "—" :
       `<a href="${EXPLORER}/address/${s.developer}" target="_blank">${short(s.developer)}</a>`
