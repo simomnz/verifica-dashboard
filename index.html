@@ -94,6 +94,27 @@
   a { color: var(--accent); }
   .links { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 
+  .picker { display: flex; gap: 6px; margin-top: 8px; }
+  .picker input {
+    font: inherit; font-size: 12px; padding: 5px 8px; width: 23em; max-width: 60vw;
+    border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--text);
+  }
+  .picker input:focus { outline: none; border-color: var(--accent); }
+
+  .editor {
+    margin-top: 16px; padding: 12px 14px; border-radius: 8px;
+    background: var(--card); border: 1px solid var(--line); font-size: 13px;
+  }
+  .editor summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+  .editor p { color: var(--muted); margin: 10px 0; }
+  .editor textarea {
+    width: 100%; font-size: 12px; padding: 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+    resize: vertical;
+  }
+  .editor textarea:focus { outline: none; border-color: var(--accent); }
+
   .flags { display: flex; gap: 6px; margin: 10px 0 2px; flex-wrap: wrap; }
   .flag {
     font-size: 11px; padding: 2px 8px; border-radius: 999px;
@@ -118,6 +139,11 @@
     <div>
       <h1>User Stories Dashboard</h1>
       <div class="sub" id="contractLine">loading…</div>
+      <div class="picker">
+        <input id="contractInput" class="mono" spellcheck="false"
+               placeholder="0x… contract address">
+        <button id="load">Load</button>
+      </div>
     </div>
     <div>
       <button class="primary" id="connect">Connect wallet</button>
@@ -129,6 +155,17 @@
 
   <div class="note" id="note"></div>
 
+  <details class="editor">
+    <summary>Task links</summary>
+    <p>Which task each user story corresponds to, in every project
+       management system. Saved per contract, in this browser.</p>
+    <textarea id="tasks" class="mono" rows="7" spellcheck="false"></textarea>
+    <div class="actions">
+      <button id="saveTasks" class="primary">Save</button>
+      <button id="resetTasks">Reset</button>
+    </div>
+  </details>
+
 </div>
 
 <script>
@@ -136,7 +173,9 @@
 // Configurazione: l'unica parte da cambiare se si pubblica un
 // contratto nuovo o si usa un altro repository.
 // ------------------------------------------------------------
-const CONTRACT = "0xc43766fBdf1c59B2d88bF674C08967E60eE84d08";
+// Il contratto si puo' cambiare dalla pagina stessa: quello qui sotto e'
+// solo il punto di partenza, usato quando non ne e' stato indicato un altro.
+const DEFAULT_CONTRACT = "0xBd5fdFc6A7Dd88ee35824cb4567420EB0177b50b";
 const REPO     = "https://github.com/simomnz/consegna-esercizi";
 
 // A quali task corrisponde ogni user story. La stessa user story puo'
@@ -151,19 +190,47 @@ const OPENPROJECT = "http://127.0.0.1:8090";
 const TAIGA       = "https://tree.taiga.io/project/simomnz-prova-api";
 const JIRA        = "https://simomnz.atlassian.net";
 
-const TASKS = {
-  0: [
-    { label: "OpenProject #1115", url: OPENPROJECT + "/work_packages/1115" }
-  ],
-  1: [
-    { label: "OpenProject #1115", url: OPENPROJECT + "/work_packages/1115" }
-  ],
-  2: [
-    { label: "OpenProject #1115", url: OPENPROJECT + "/work_packages/1115" },
-    { label: "Taiga #7",          url: TAIGA + "/us/7" },
-    { label: "Jira KAN-12",       url: JIRA + "/browse/KAN-12" }
-  ]
+// Di ogni user story si scrivono solo gli identificativi delle task: gli
+// indirizzi li costruisce la pagina. La corrispondenza si modifica da qui
+// sotto e resta memorizzata nel browser, separatamente per ogni contratto.
+const DEFAULT_TASKS = {
+  "0": { openproject: "1119", taiga: "11", jira: "KAN-16" }
 };
+
+let TASKS = {};
+
+function loadTasks() {
+  try {
+    const saved = localStorage.getItem("tasks:" + CONTRACT);
+    if (saved) {
+      TASKS = JSON.parse(saved);
+      return;
+    }
+  } catch (e) {
+    // memoria del browser non disponibile, o contenuto illeggibile
+  }
+  TASKS = DEFAULT_TASKS;
+}
+
+function linksFor(id) {
+  const entry = TASKS[String(id)];
+  if (!entry) return [];
+
+  const links = [];
+  if (entry.openproject) {
+    links.push({ label: "OpenProject #" + entry.openproject,
+                 url: OPENPROJECT + "/work_packages/" + entry.openproject });
+  }
+  if (entry.taiga) {
+    links.push({ label: "Taiga #" + entry.taiga,
+                 url: TAIGA + "/us/" + entry.taiga });
+  }
+  if (entry.jira) {
+    links.push({ label: "Jira " + entry.jira,
+                 url: JIRA + "/browse/" + entry.jira });
+  }
+  return links;
+}
 const RPC      = "https://ethereum-sepolia-rpc.publicnode.com";
 const EXPLORER = "https://sepolia.etherscan.io";
 const CHAIN_ID = 11155111n;          // Sepolia
@@ -182,10 +249,29 @@ const ABI = [
   "function fundUS(uint256) payable"
 ];
 
+// Quale contratto guardare, in ordine: quello scritto nell'indirizzo della
+// pagina (?contract=0x…), quello scelto l'ultima volta, altrimenti quello
+// predefinito. Il primo caso serve a mandare a qualcuno un collegamento
+// che apre gia' il contratto giusto.
+function chosenContract() {
+  const asked = new URLSearchParams(location.search).get("contract");
+  if (asked && ethers.isAddress(asked)) return asked;
+
+  try {
+    const saved = localStorage.getItem("contract");
+    if (saved && ethers.isAddress(saved)) return saved;
+  } catch (e) {
+    // in alcune finestre la memoria del browser non e' accessibile
+  }
+  return DEFAULT_CONTRACT;
+}
+
+let CONTRACT = chosenContract();
+
 // Il provider di sola lettura: la pagina mostra i dati anche senza
 // portafoglio collegato. Il portafoglio serve solo per firmare.
 const reader = new ethers.JsonRpcProvider(RPC);
-const readOnly = new ethers.Contract(CONTRACT, ABI, reader);
+let readOnly = new ethers.Contract(CONTRACT, ABI, reader);
 
 let signer = null;
 let me = null;       // indirizzo collegato
@@ -269,7 +355,7 @@ function cardFor(s) {
 
   const commit = s.commit.replace(/^0x/, "");
   const isEmpty = /^0+$/.test(commit);
-  const tasks = TASKS[s.id] || [];
+  const tasks = linksFor(s.id);
 
   card.innerHTML = `
     <h3>User story ${s.id}</h3>
@@ -425,14 +511,13 @@ document.getElementById("connect").onclick = connect;
 // Avvio
 // ------------------------------------------------------------
 
-(async () => {
+async function load() {
+  document.getElementById("contractInput").value = CONTRACT;
   document.getElementById("contractLine").innerHTML =
     `Sepolia · <a href="${EXPLORER}/address/${CONTRACT}" target="_blank" class="mono">${short(CONTRACT)}</a>`;
 
-  document.getElementById("note").textContent =
-    "Automated tests are signed by the verification system. "
-    + "The Product Owner approves by hand, and the developer claims the payment "
-    + "when all the required signatures are in place.";
+  loadTasks();
+  document.getElementById("tasks").value = JSON.stringify(TASKS, null, 2);
 
   try {
     await loadRoles();
@@ -441,7 +526,67 @@ document.getElementById("connect").onclick = connect;
     document.getElementById("columns").innerHTML =
       `<div class="empty">Cannot reach the contract: ${reason(e)}</div>`;
   }
-})();
+}
+
+document.getElementById("load").onclick = () => {
+  const asked = document.getElementById("contractInput").value.trim();
+
+  if (!ethers.isAddress(asked)) {
+    alert("Not a valid address.");
+    return;
+  }
+
+  CONTRACT = asked;
+  readOnly = new ethers.Contract(CONTRACT, ABI, reader);
+
+  try {
+    localStorage.setItem("contract", CONTRACT);
+  } catch (e) {
+    // se la memoria del browser non e' disponibile si continua lo stesso:
+    // l'indirizzo vale per questa sessione e basta
+  }
+
+  load();
+};
+
+document.getElementById("contractInput").addEventListener("keydown", event => {
+  if (event.key === "Enter") document.getElementById("load").click();
+});
+
+document.getElementById("saveTasks").onclick = () => {
+  const written = document.getElementById("tasks").value;
+
+  try {
+    TASKS = JSON.parse(written);
+  } catch (e) {
+    alert("This is not valid JSON: " + e.message);
+    return;
+  }
+
+  try {
+    localStorage.setItem("tasks:" + CONTRACT, written);
+  } catch (e) {
+    // senza memoria del browser la modifica vale solo per questa sessione
+  }
+
+  refresh();
+};
+
+document.getElementById("resetTasks").onclick = () => {
+  try {
+    localStorage.removeItem("tasks:" + CONTRACT);
+  } catch (e) {
+    // niente da rimuovere
+  }
+  load();
+};
+
+document.getElementById("note").textContent =
+  "Automated tests are signed by the verification system. "
+  + "The Product Owner approves by hand, and the developer claims the payment "
+  + "when all the required signatures are in place.";
+
+load();
 </script>
 </body>
 </html>
